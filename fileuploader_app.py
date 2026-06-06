@@ -22,13 +22,14 @@ import math
 class CircularProgressBar(tk.Canvas):
     """Custom circular progress bar with status indicator"""
     
-    def __init__(self, parent, size=150, **kwargs):
-        super().__init__(parent, width=size, height=size, bg="transparent", 
+    def __init__(self, parent, size=150, bg_color="#222222", **kwargs):
+        super().__init__(parent, width=size, height=size, bg=bg_color, 
                         highlightthickness=0, **kwargs)
         self.size = size
         self.progress = 0
         self.status = "idle"  # idle, uploading, success, failed
         self.status_text = ""
+        self.bg_color = bg_color
     
     def draw_progress(self):
         """Draw the circular progress bar"""
@@ -41,7 +42,7 @@ class CircularProgressBar(tk.Canvas):
         self.create_oval(
             center - radius, center - radius,
             center + radius, center + radius,
-            outline="#444444", width=3, fill="#222222"
+            outline="#444444", width=3, fill="#1a1a1a"
         )
         
         # Draw progress arc
@@ -237,7 +238,7 @@ class ArtifactoryUploader:
         progress_container = ttk.Frame(status_frame)
         progress_container.pack(pady=15)
         
-        self.progress_canvas = CircularProgressBar(progress_container, size=180)
+        self.progress_canvas = CircularProgressBar(progress_container, size=180, bg_color="#222222")
         self.progress_canvas.pack()
         
         # Status label
