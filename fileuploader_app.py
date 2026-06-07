@@ -17,6 +17,8 @@ import base64
 from datetime import datetime
 import threading
 import math
+import pickle
+from pathlib import Path
 
 
 class CircularProgressBar(tk.Canvas):
@@ -129,17 +131,20 @@ class CircularProgressBar(tk.Canvas):
 class ArtifactoryUploader:
     """Artifactory File Upload Manager"""
     
+    CONFIG_FILE = Path.home() / ".artifactory_uploader_config"
+    
     def __init__(self, root):
         self.root = root
         self.root.title("Artifactory File Uploader")
-        self.root.geometry("1000x900")
+        self.root.geometry("1200x950")
         self.root.resizable(True, True)
         
         # Theme selection
         self.theme_var = tk.StringVar(value="darkly")
         
         # Variables
-        self.artifactory_url = tk.StringVar(value="https://artifactory.example.com")
+        self.artifactory_urls = []
+        self.artifactory_url = tk.StringVar()
         self.username = tk.StringVar()
         self.password = tk.StringVar()
         self.source_file = tk.StringVar()
@@ -147,36 +152,85 @@ class ArtifactoryUploader:
         self.api_token = tk.StringVar()
         self.upload_status = tk.StringVar(value="Ready")
         
+        # Load saved URLs
+        self.load_artifactory_urls()
+        
         # Setup UI
         self.setup_ui()
     
+    def load_artifactory_urls(self):
+        """Load previously saved Artifactory URLs"""
+        if self.CONFIG_FILE.exists():
+            try:
+                with open(self.CONFIG_FILE, 'rb') as f:
+                    data = pickle.load(f)
+                    if isinstance(data, list):
+                        self.artifactory_urls = data
+                    else:
+                        self.artifactory_urls = []
+            except Exception as e:
+                print(f"Error loading URLs: {e}")
+                self.artifactory_urls = []
+    
+    def save_artifactory_urls(self):
+        """Save Artifactory URLs for future use"""
+        try:
+            with open(self.CONFIG_FILE, 'wb') as f:
+                pickle.dump(self.artifactory_urls, f)
+        except Exception as e:
+            print(f"Error saving URLs: {e}")
+    
+    def add_to_url_history(self, url):
+        """Add URL to history if not already present"""
+        if url and url not in self.artifactory_urls:
+            self.artifactory_urls.insert(0, url)
+            # Keep only last 10 URLs
+            self.artifactory_urls = self.artifactory_urls[:10]
+            self.save_artifactory_urls()
+            # Update combo box values
+            if hasattr(self, 'url_combo'):
+                self.url_combo['values'] = self.artifactory_urls
+    
     def setup_ui(self):
         """Setup the user interface"""
+        
+        # Create top frame with theme selector
+        top_frame = ttk.Frame(self.root)
+        top_frame.pack(fill=X, padx=15, pady=10)
+        
+        # Spacer to push theme selector to the right
+        ttk.Label(top_frame, text="").pack(side=LEFT, fill=X, expand=True)
+        
+        # ===== THEME SELECTOR (TOP RIGHT - GEAR ICON) =====
+        theme_frame = ttk.Frame(top_frame)
+        theme_frame.pack(side=RIGHT)
+        
+        theme_label = ttk.Label(theme_frame, text="⚙", font=("Arial", 16))
+        theme_label.pack(side=LEFT, padx=(0, 5))
+        
+        themes = ["darkly", "solar", "superhero", "cyborg", "vapor"]
+        theme_combo = ttk.Combobox(theme_frame, textvariable=self.theme_var, 
+                                    values=themes, state="readonly", width=12)
+        theme_combo.pack(side=LEFT)
+        theme_combo.bind("<<ComboboxSelected>>", self.change_theme)
         
         # Create main frame
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=BOTH, expand=True, padx=15, pady=15)
         
-        # ===== THEME SELECTOR =====
-        theme_frame = ttk.LabelFrame(main_frame, text="Theme Settings")
-        theme_frame.pack(fill=X, pady=(0, 15), padx=10, ipady=10)
-        
-        theme_label = ttk.Label(theme_frame, text="Select Theme:")
-        theme_label.pack(side=LEFT, padx=5)
-        
-        themes = ["darkly", "solar", "superhero", "cyborg", "vapor"]
-        theme_combo = ttk.Combobox(theme_frame, textvariable=self.theme_var, 
-                                    values=themes, state="readonly", width=15)
-        theme_combo.pack(side=LEFT, padx=5)
-        theme_combo.bind("<<ComboboxSelected>>", self.change_theme)
-        
         # ===== ARTIFACTORY CONFIGURATION =====
         config_frame = ttk.LabelFrame(main_frame, text="Artifactory Configuration")
         config_frame.pack(fill=X, pady=(0, 15), padx=10, ipady=10)
         
-        # Artifactory URL
+        # Artifactory URL with dropdown
         ttk.Label(config_frame, text="Artifactory URL:", font=("Arial", 10, "bold")).pack(anchor=W, pady=(5, 0), padx=10)
-        ttk.Entry(config_frame, textvariable=self.artifactory_url, width=60).pack(fill=X, pady=(0, 10), padx=10)
+        url_frame = ttk.Frame(config_frame)
+        url_frame.pack(fill=X, pady=(0, 10), padx=10)
+        
+        self.url_combo = ttk.Combobox(url_frame, textvariable=self.artifactory_url, 
+                                       values=self.artifactory_urls, width=70)
+        self.url_combo.pack(side=LEFT, fill=X, expand=True)
+        self.url_combo.bind("<<ComboboxSelected>>", self.on_url_selected)
         
         # ===== CREDENTIALS SECTION =====
         credentials_frame = ttk.LabelFrame(main_frame, text="Authentication")
@@ -193,7 +247,7 @@ class ArtifactoryUploader:
         
         # Token Generation Button
         ttk.Button(credentials_frame, text="Generate API Token", 
-                  command=self.generate_token, bootstyle="info").pack(anchor=W, pady=(5, 0), padx=10)
+                   command=self.generate_token, bootstyle="info").pack(anchor=W, pady=(5, 0), padx=10)
         
         # API Token Display
         ttk.Label(credentials_frame, text="Generated Token:", font=("Arial", 10, "bold")).pack(anchor=W, pady=(10, 0), padx=10)
@@ -226,9 +280,9 @@ class ArtifactoryUploader:
         action_frame.pack(fill=X, pady=(0, 15), padx=10)
         
         ttk.Button(action_frame, text="Upload to Artifactory", command=self.upload_file, 
-                  bootstyle="danger", width=20).pack(side=LEFT, padx=5)
+                   bootstyle="danger", width=20).pack(side=LEFT, padx=5)
         ttk.Button(action_frame, text="Clear All", command=self.clear_fields, 
-                  bootstyle="secondary", width=20).pack(side=LEFT, padx=5)
+                   bootstyle="secondary", width=20).pack(side=LEFT, padx=5)
         
         # ===== STATUS SECTION WITH CIRCULAR PROGRESS =====
         status_frame = ttk.LabelFrame(main_frame, text="Upload Status")
@@ -252,6 +306,12 @@ class ArtifactoryUploader:
         self.log_text = scrolledtext.ScrolledText(status_frame, height=8, width=100, 
                                                    state=DISABLED, font=("Courier", 9))
         self.log_text.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+    
+    def on_url_selected(self, event=None):
+        """Handle URL selection from dropdown"""
+        url = self.artifactory_url.get()
+        if url:
+            self.add_to_url_history(url)
     
     def change_theme(self, event=None):
         """Change application theme"""
@@ -344,6 +404,11 @@ class ArtifactoryUploader:
         source_file = self.source_file.get().strip()
         destination_path = self.destination_path.get().strip()
         api_token = self.api_token.get().strip()
+        artifactory_url = self.artifactory_url.get().strip()
+        
+        if not artifactory_url:
+            messagebox.showerror("Error", "Please enter Artifactory URL")
+            return
         
         if not source_file or not os.path.exists(source_file):
             messagebox.showerror("Error", "Please select a valid source file")
@@ -357,6 +422,9 @@ class ArtifactoryUploader:
             messagebox.showerror("Error", "Please generate API token first")
             return
         
+        # Add URL to history
+        self.add_to_url_history(artifactory_url)
+        
         # Set progress to uploading
         self.progress_canvas.set_status("uploading")
         self.upload_status.set("Uploading...")
@@ -364,18 +432,18 @@ class ArtifactoryUploader:
         # Run upload in separate thread
         upload_thread = threading.Thread(
             target=self._perform_upload,
-            args=(source_file, destination_path, api_token)
+            args=(source_file, destination_path, api_token, artifactory_url)
         )
         upload_thread.daemon = True
         upload_thread.start()
     
-    def _perform_upload(self, source_file, destination_path, api_token):
+    def _perform_upload(self, source_file, destination_path, api_token, artifactory_url):
         """Perform the actual file upload"""
         try:
             self.log_message(f"Starting upload: {os.path.basename(source_file)}", "info")
             
             # Prepare upload URL
-            artifactory_url = self.artifactory_url.get().rstrip("/")
+            artifactory_url = artifactory_url.rstrip("/")
             destination_path = destination_path.lstrip("/")
             upload_url = f"{artifactory_url}/{destination_path}{os.path.basename(source_file)}"
             
